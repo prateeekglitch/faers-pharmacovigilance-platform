@@ -336,13 +336,13 @@ with col_exp1:
     export_excel_report(analysis, output_path=report_filename)
     with open(report_filename, "rb") as f:
         st.download_button(
-            label="📥 Download Executive Safety Brief (Excel)",
+            label="📥 Download Interactive What-If Decision Model (Excel)",
             data=f.read(),
             file_name=report_filename,
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 with col_exp2:
-    st.caption("Generates a multi-sheet regulatory deliverable formatted for Medical Affairs and Safety Review Committees.")
+    st.caption("⚡ **Live Excel Engine:** Includes interactive 'What-If' sensitivity simulator, native dynamic charts, and financial liability exposure quantification.")
 
 # 6. COLLAPSIBLE TECHNICAL METHODOLOGY (For Deep-Dive Interviewers)
 with st.expander("🔬 Technical Deep-Dive & Statistical Methodology (Click to expand)"):
