@@ -240,7 +240,7 @@ with tab_matrix:
         {"Cell": "B (Drug + Other Events)", "Description": "Target Drug with all other adverse events", "Count": f"{B:,}"},
         {"Cell": "C (Other Drugs + Event)", "Description": "All other drugs associated with target adverse event", "Count": f"{C:,}"},
         {"Cell": "D (General Background)", "Description": "General database background (Neither target drug nor event)", "Count": f"{D:,}"},
-        {"Total (N)", "Description": "Total safety surveillance cohort size", "Count": f"{A+B+C+D:,}"}
+        {"Cell": "Total (N)", "Description": "Total safety surveillance cohort size", "Count": f"{A+B+C+D:,}"}
     ])
     st.table(matrix_df)
 
