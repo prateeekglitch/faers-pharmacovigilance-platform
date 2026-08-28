@@ -1,6 +1,6 @@
 """
-FAERS & EudraVigilance Pharmacovigilance Signal Detection Platform
-Interactive Streamlit Dashboard
+Drug Safety Signal & Risk Intelligence Platform (FDA FAERS)
+Executive Decision Dashboard for Pharmacovigilance & Regulatory Surveillance
 """
 
 import os
@@ -8,6 +8,7 @@ import sys
 import numpy as np
 import pandas as pd
 import streamlit as st
+import plotly.graph_objects as go
 
 # Add project root to sys.path
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
@@ -21,257 +22,334 @@ from src.faers.analytics import (
     run_full_disproportionality_analysis,
     calculate_2x2_counts
 )
-from src.faers.visualizations import (
-    plot_bayesian_posterior,
-    plot_forest_summary,
-    plot_contingency_matrix,
-    plot_volcano_quadrant
-)
 from src.faers.reporting import export_excel_report
-from src.faers.loader import load_faers_files
-from src.faers.deduplication import vigimatch_deduplicate_drugs
 
-# Streamlit Page Config
+# Page Config
 st.set_page_config(
-    page_title="FAERS Pharmacovigilance Signal Detection",
-    page_icon="💊",
+    page_title="Drug Safety Risk Intelligence",
+    page_icon="🏥",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Benchmark clinical case studies for instant, zero-latency exploration
+# Custom Styling for Clean Executive Look
+st.markdown("""
+<style>
+    .metric-card {
+        background-color: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        padding: 16px;
+        text-align: center;
+    }
+    .action-box {
+        background-color: #f0fdf4;
+        border-left: 4px solid #22c55e;
+        padding: 14px;
+        border-radius: 6px;
+        margin-top: 10px;
+    }
+    .warning-box {
+        background-color: #fefce8;
+        border-left: 4px solid #eab308;
+        padding: 14px;
+        border-radius: 6px;
+        margin-top: 10px;
+    }
+    .alert-box {
+        background-color: #fef2f2;
+        border-left: 4px solid #ef4444;
+        padding: 14px;
+        border-radius: 6px;
+        margin-top: 10px;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Curated Real-World Case Studies with Plain-English Context
 BENCHMARK_CASE_STUDIES = {
-    "Capivasertib (Truqap) & Stomatitis (AstraZeneca)": {
+    "Capivasertib (Truqap) & Mouth Sores (Stomatitis)": {
         "drug": "Capivasertib (Truqap)",
         "event": "Stomatitis / Oral Mucositis",
+        "company": "AstraZeneca",
+        "indication": "HR+/HER2- Breast Cancer",
         "A": 24, "B": 956, "C": 5120, "D": 321800,
-        "background": "AstraZeneca's AKT inhibitor Truqap approved for HR+/HER2- breast cancer. Safety surveillance detected elevated oral mucosal inflammation signals."
+        "context": "Post-market surveillance of AstraZeneca's Truqap detected elevated mouth ulcer reports, requiring proactive patient monitoring guidance."
     },
-    "Semaglutide (Ozempic/Wegovy) & Gastroparesis (Novo Nordisk)": {
+    "Semaglutide (Ozempic/Wegovy) & Stomach Paralysis (Gastroparesis)": {
         "drug": "Semaglutide (Ozempic/Wegovy)",
         "event": "Gastroparesis / Delayed Gastric Emptying",
+        "company": "Novo Nordisk",
+        "indication": "Type 2 Diabetes & Weight Loss",
         "A": 412, "B": 18450, "C": 1250, "D": 450000,
-        "background": "GLP-1 receptor agonist surveillance investigating gastrointestinal motility reduction and post-marketing stomach paralysis reports."
+        "context": "Rapid post-launch adoption triggered disproportionate reporting of severe stomach paralysis compared to other anti-diabetic medications."
     },
-    "Pembrolizumab (Keytruda) & Immune Colitis (Merck)": {
+    "Pembrolizumab (Keytruda) & Severe Colon Inflammation (Colitis)": {
         "drug": "Pembrolizumab (Keytruda)",
         "event": "Immune-Mediated Colitis",
+        "company": "Merck",
+        "indication": "Immuno-Oncology (Multiple Cancers)",
         "A": 185, "B": 12400, "C": 1940, "D": 410000,
-        "background": "PD-1 checkpoint inhibitor oncology surveillance assessing immune-related adverse events (irAEs) requiring corticosteroid intervention."
+        "context": "Safety monitoring for autoimmune side effects requiring immediate corticosteroid treatment and dose adjustment."
     },
-    "Palbociclib (Ibrance) & Neutropenia (Pfizer)": {
+    "Palbociclib (Ibrance) & Low White Blood Cell Count (Neutropenia)": {
         "drug": "Palbociclib (Ibrance)",
-        "event": "Neutropenia / Bone Marrow Suppression",
+        "event": "Neutropenia",
+        "company": "Pfizer",
+        "indication": "Advanced Breast Cancer",
         "A": 650, "B": 14200, "C": 4800, "D": 380000,
-        "background": "CDK4/6 inhibitor post-marketing safety data confirming predictable hematologic toxicities requiring regular CBC lab monitoring."
+        "context": "Known mechanism-based safety signal confirming regular blood count lab monitoring protocols for patients."
     }
 }
 
-# Sidebar Controls
-st.sidebar.title("💊 Safety Surveillance")
-st.sidebar.markdown("**Pharmacovigilance Decision Analytics**")
+# Sidebar - Simplified Control Center
+st.sidebar.markdown("## 🏥 Safety Surveillance")
+st.sidebar.caption("FDA FAERS Post-Marketing Intelligence")
 
-mode = st.sidebar.radio(
-    "Select Operating Mode:",
-    ["📊 Benchmark Case Studies (Instant Demo)", "⚙️ Custom 2x2 Matrix Input", "📂 Live Local FAERS Data Query"]
+demo_choice = st.sidebar.selectbox(
+    "Select Drug Safety Case:",
+    list(BENCHMARK_CASE_STUDIES.keys()) + ["⚙️ Custom Drug Evaluation"]
 )
 
-if mode == "📊 Benchmark Case Studies (Instant Demo)":
-    case_key = st.sidebar.selectbox("Choose Clinical Case Study:", list(BENCHMARK_CASE_STUDIES.keys()))
-    case_info = BENCHMARK_CASE_STUDIES[case_key]
-    drug_name = case_info["drug"]
-    event_name = case_info["event"]
-    A = case_info["A"]
-    B = case_info["B"]
-    C = case_info["C"]
-    D = case_info["D"]
-    clinical_note = case_info["background"]
+if demo_choice != "⚙️ Custom Drug Evaluation":
+    case = BENCHMARK_CASE_STUDIES[demo_choice]
+    drug_name = case["drug"]
+    event_name = case["event"]
+    company_name = case["company"]
+    indication = case["indication"]
+    context_desc = case["context"]
+    A, B, C, D = case["A"], case["B"], case["C"], case["D"]
+else:
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### Custom Case Input")
+    drug_name = st.sidebar.text_input("Drug Name", value="Novel Oncology Candidate")
+    event_name = st.sidebar.text_input("Adverse Side Effect", value="Liver Injury")
+    company_name = "Custom Sponsor"
+    indication = "Target Indication"
+    context_desc = "Ad-hoc safety evaluation for novel signal detection."
+    
+    st.sidebar.caption("Patient Case Counts")
+    A = st.sidebar.number_input("Target Drug with Side Effect (Cases)", value=35, min_value=1)
+    B = st.sidebar.number_input("Target Drug with other side effects", value=1200, min_value=1)
+    C = st.sidebar.number_input("Other Drugs with this Side Effect", value=4500, min_value=1)
+    D = st.sidebar.number_input("Other Drugs with other side effects", value=350000, min_value=1)
 
-elif mode == "⚙️ Custom 2x2 Matrix Input":
-    st.sidebar.markdown("### 2x2 Contingency Counts")
-    drug_name = st.sidebar.text_input("Target Drug Name:", value="Novel Oncology Drug")
-    event_name = st.sidebar.text_input("Target Adverse Event:", value="Hepatotoxicity")
-    A = st.sidebar.number_input("Cell A (Drug + Event):", min_value=0, value=35, step=1)
-    B = st.sidebar.number_input("Cell B (Drug + Other Events):", min_value=1, value=1200, step=50)
-    C = st.sidebar.number_input("Cell C (Other Drugs + Event):", min_value=1, value=4500, step=100)
-    D = st.sidebar.number_input("Cell D (General Background):", min_value=1, value=350000, step=1000)
-    clinical_note = "Custom parameter evaluation for ad-hoc safety review."
-
-else:  # Live Local FAERS Data Query
-    st.sidebar.markdown("### Query Local FAERS Dataset")
-    drug_input = st.sidebar.text_input("Drug Synonyms (comma separated):", value="CAPIVASERTIB, TRUQAP")
-    event_input = st.sidebar.text_input("MedDRA Terms (comma separated):", value="STOMATITIS")
-    data_folder = st.sidebar.text_input("FAERS Data Directory:", value="./data-source")
-
-    drug_synonyms = [s.strip().upper() for s in drug_input.split(",") if s.strip()]
-    event_synonyms = [s.strip().upper() for s in event_input.split(",") if s.strip()]
-    drug_name = ", ".join(drug_synonyms)
-    event_name = ", ".join(event_synonyms)
-    clinical_note = f"Real-time pipeline scan on FAERS data directory: `{data_folder}`."
-
-    if st.sidebar.button("🚀 Run Live Extraction"):
-        with st.spinner("Executing ETL, VigiMatch deduplication, and 2x2 matrix generation..."):
-            df_drug, _ = load_faers_files(data_folder, "DRUG*.txt")
-            df_reac, _ = load_faers_files(data_folder, "REAC*.txt")
-            if df_drug.empty or df_reac.empty:
-                st.error("Could not find DRUG or REAC files in data-source. Falling back to Capivasertib benchmark.")
-                A, B, C, D = 24, 956, 5120, 321800
-            else:
-                df_drug_ps, _ = vigimatch_deduplicate_drugs(df_drug, drug_synonyms)
-                all_ids = set(df_drug['primaryid'].dropna().unique())
-                drug_ids = set(df_drug_ps[df_drug_ps['drugname_norm'].isin(drug_synonyms)]['primaryid'].unique())
-                reac_matches = df_reac[df_reac['pt'].fillna('').str.upper().str.contains('|'.join(event_synonyms))]['primaryid'].unique()
-                event_ids = set(reac_matches)
-                A, B, C, D = calculate_2x2_counts(all_ids, drug_ids, event_ids)
-    else:
-        # Default starting values until button clicked
-        A, B, C, D = 24, 956, 5120, 321800
-
-# Monte Carlo Settings in Sidebar
-with st.sidebar.expander("🔬 Bayesian Engine Parameters", expanded=False):
-    n_samples = st.slider("Monte Carlo Simulations:", min_value=5000, max_value=50000, value=20000, step=5000)
-    prior_a = st.number_input("Beta Prior Alpha (α):", min_value=0.1, value=1.0, step=0.5)
-    prior_b = st.number_input("Beta Prior Beta (β):", min_value=0.1, value=1.0, step=0.5)
-
-# Execute Statistical & Bayesian Pipeline
+# Run Analysis Pipeline
 analysis = run_full_disproportionality_analysis(A, B, C, D, drug_label=drug_name, event_label=event_name)
 freq = analysis["frequentist"]
 bcpnn = analysis["bcpnn_ic"]
 bayes_prr = analysis["bayes_prr"]
-bayes_ror = analysis["bayes_ror"]
 triage = analysis["triage"]
 
-# Header
-st.title("💊 Post-Marketing Pharmacovigilance Signal Detection")
+# Calculate High-Impact KPIs
+prr_val = freq["prr"]
+prr_low = freq["prr_ci_low"]
+prr_high = freq["prr_ci_high"]
+confidence_pct = bayes_prr["prob_greater_1"] * 100
+total_patients = A + B + C + D
+
+# ----------------- MAIN UI -----------------
+
+st.title("🏥 Drug Safety Risk & Decision Intelligence")
 st.markdown(
-    "**End-to-End Decision Analytics System for Regulatory Surveillance (FDA FAERS & EMA EudraVigilance)**"
+    f"**Surveillance Target:** `{drug_name}` ({company_name}) &nbsp;|&nbsp; "
+    f"**Adverse Event:** `{event_name}` &nbsp;|&nbsp; "
+    f"**Indication:** *{indication}*"
 )
+st.caption(f"💡 **Context:** {context_desc}")
 
-# Triage Alert Banner
-alert_tier = triage["tier"]
-if "HIGH" in alert_tier:
-    st.error(f"🚨 **SIGNAL TRIAGE: {alert_tier}**\n\n**Action:** {triage['action']}")
-elif "MODERATE" in alert_tier:
-    st.warning(f"⚠️ **SIGNAL TRIAGE: {alert_tier}**\n\n**Action:** {triage['action']}")
-elif "LOW" in alert_tier:
-    st.info(f"ℹ️ **SIGNAL TRIAGE: {alert_tier}**\n\n**Action:** {triage['action']}")
+st.markdown("---")
+
+# 1. EXECUTIVE ACTION HERO BANNER
+if "HIGH" in triage["tier"]:
+    st.markdown(f"""
+    <div class="alert-box">
+        <h3 style="margin:0; color:#b91c1c;">🚨 HIGH SAFETY SIGNAL DETECTED</h3>
+        <p style="margin:5px 0 0 0; font-size:15px; color:#7f1d1d;">
+            <b>Decision Verdict:</b> This adverse reaction is reported significantly more often with <b>{drug_name}</b> than industry baseline.
+        </p>
+        <p style="margin:5px 0 0 0; font-size:14px; color:#991b1b;">
+            <b>Recommended Action:</b> Initiate FDA 15-Day Expedited Review. Prepare updated warning language for the drug package insert.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+elif "MODERATE" in triage["tier"]:
+    st.markdown(f"""
+    <div class="warning-box">
+        <h3 style="margin:0; color:#a16207;">⚠️ MODERATE / EMERGING SAFETY SIGNAL</h3>
+        <p style="margin:5px 0 0 0; font-size:15px; color:#713f12;">
+            <b>Decision Verdict:</b> Disproportionate reports detected for <b>{drug_name}</b>. May indicate an emerging safety trend.
+        </p>
+        <p style="margin:5px 0 0 0; font-size:14px; color:#854d0e;">
+            <b>Recommended Action:</b> Maintain enhanced quarterly active surveillance; review potential drug-drug interactions.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
 else:
-    st.success(f"✅ **SIGNAL TRIAGE: {alert_tier}**\n\n**Action:** {triage['action']}")
+    st.markdown(f"""
+    <div class="action-box">
+        <h3 style="margin:0; color:#15803d;">✅ LOW / NO SAFETY SIGNAL</h3>
+        <p style="margin:5px 0 0 0; font-size:15px; color:#14532d;">
+            <b>Decision Verdict:</b> Incident rate is consistent with expected general database background rates.
+        </p>
+        <p style="margin:5px 0 0 0; font-size:14px; color:#166534;">
+            <b>Recommended Action:</b> Continue standard routine post-marketing pharmacovigilance monitoring.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
 
-# Top KPI Metric Cards
-col1, col2, col3, col4, col5 = st.columns(5)
+st.write("")
+
+# 2. THREE CORE ACTIONABLE KPIS
+col1, col2, col3 = st.columns(3)
+
 with col1:
-    st.metric("Co-occurrence (A)", f"{A:,}", help="Cases reporting both target drug and adverse event")
-with col2:
-    st.metric("PRR (95% CI)", f"{freq['prr']:.2f}", f"[{freq['prr_ci_low']:.2f} - {freq['prr_ci_high']:.2f}]")
-with col3:
-    st.metric("ROR (Odds Ratio)", f"{freq['ror']:.2f}", f"[{freq['ror_ci_low']:.2f} - {freq['ror_ci_high']:.2f}]")
-with col4:
-    st.metric("BCPNN IC (log₂)", f"{bcpnn['ic']:.2f}", f"IC₀₂₅: {bcpnn['ic_025']:.2f}")
-with col5:
-    st.metric("Bayesian P(PRR > 1)", f"{bayes_prr['prob_greater_1']*100:.1f}%", help="Posterior probability that true risk ratio exceeds 1.0")
+    st.metric(
+        label="👥 Patient Cases Reported",
+        value=f"{A:,} Patients",
+        help="Total real-world patient reports in the FDA database linking this drug to this side effect."
+    )
+    st.caption(f"Out of **{A+B:,}** total safety reports for {drug_name}")
 
-# Main Analysis Tabs
-tab_summary, tab_charts, tab_matrix, tab_methods, tab_export = st.tabs([
-    "📋 Executive Summary & Case Brief",
-    "📈 Statistical & Bayesian Charts",
-    "🗂️ 2x2 Matrix & Data Integrity",
-    "📐 Methodology & Math",
-    "📥 Export Center"
+with col2:
+    risk_label = f"{prr_val:.2f}x Normal Rate"
+    risk_delta = f"+{((prr_val - 1.0) * 100):.0f}% vs Baseline" if prr_val > 1 else "Normal"
+    st.metric(
+        label="📈 Relative Risk Multiplier (PRR)",
+        value=risk_label,
+        delta=risk_delta,
+        delta_color="inverse",
+        help="How many times more frequently this side effect is reported for this drug compared to all other medications."
+    )
+    st.caption(f"Estimated 95% range: **[{prr_low:.2f}x – {prr_high:.2f}x]**")
+
+with col3:
+    st.metric(
+        label="🎯 Signal Confidence",
+        value=f"{confidence_pct:.1f}% Certainty",
+        help="Bayesian certainty that the elevated risk is a genuine safety signal, not random statistical noise."
+    )
+    st.caption("Derived from 20,000 Monte Carlo statistical simulations")
+
+st.markdown("---")
+
+# 3. TWO IMPACTFUL VISUALS (NO CLUTTER)
+col_chart1, col_chart2 = st.columns(2)
+
+with col_chart1:
+    st.subheader("📊 Risk Level vs FDA Safety Benchmarks")
+    
+    # Clean, intuitive benchmark bar chart
+    fig_gauge = go.Figure()
+    
+    categories = ["Baseline (All Drugs)", "Warning Threshold", "FDA Action Threshold", f"<b>{drug_name}</b>"]
+    values = [1.0, 1.5, 2.0, prr_val]
+    colors = ["#94a3b8", "#fbbf24", "#f87171", "#ef4444" if prr_val >= 2.0 else "#eab308" if prr_val >= 1.5 else "#22c55e"]
+    
+    fig_gauge.add_trace(go.Bar(
+        x=categories,
+        y=values,
+        marker_color=colors,
+        text=[f"{v:.2f}x" for v in values],
+        textposition='outside'
+    ))
+    
+    fig_gauge.add_hline(y=1.0, line_dash="dot", line_color="#64748b", annotation_text="Baseline (1.0x)")
+    fig_gauge.add_hline(y=2.0, line_dash="dash", line_color="#ef4444", annotation_text="FDA Alert Line (2.0x)")
+    
+    fig_gauge.update_layout(
+        template="plotly_white",
+        yaxis_title="Risk Multiplier (PRR)",
+        xaxis_title="",
+        height=340,
+        margin=dict(l=20, r=20, t=30, b=20),
+        showlegend=False
+    )
+    st.plotly_chart(fig_gauge, use_container_width=True)
+    st.caption("📌 **Inference:** Compares this drug's side-effect rate against standard regulatory alert thresholds.")
+
+with col_chart2:
+    st.subheader("👥 Patient Safety Cohort Comparison")
+    
+    # Clean 2-bar comparison: Rate in Target Drug vs Rate in Database
+    rate_drug = (A / (A + B)) * 100
+    rate_bg = (C / (C + D)) * 100
+    
+    fig_comp = go.Figure()
+    fig_comp.add_trace(go.Bar(
+        name="Target Drug Rate",
+        x=[f"{drug_name}"],
+        y=[rate_drug],
+        marker_color="#2563eb",
+        text=[f"{rate_drug:.2f}% of reports"],
+        textposition='outside'
+    ))
+    fig_comp.add_trace(go.Bar(
+        name="All Other Drugs Rate",
+        x=["All Other Medications"],
+        y=[rate_bg],
+        marker_color="#94a3b8",
+        text=[f"{rate_bg:.2f}% of reports"],
+        textposition='outside'
+    ))
+    
+    fig_comp.update_layout(
+        template="plotly_white",
+        yaxis_title="% of Adverse Reports with this Condition",
+        height=340,
+        margin=dict(l=20, r=20, t=30, b=20),
+        showlegend=False
+    )
+    st.plotly_chart(fig_comp, use_container_width=True)
+    st.caption(f"📌 **Inference:** Shows that **{rate_drug:.2f}%** of {drug_name} safety reports mention this reaction, vs **{rate_bg:.2f}%** across all other drugs.")
+
+st.markdown("---")
+
+# 4. ACTIONABLE DECISION & REGULATORY SUMMARY TABLE
+st.subheader("📋 Executive Decision & Action Summary")
+
+summary_df = pd.DataFrame([
+    {
+        "Decision Area": "🩺 Clinical Safety Finding",
+        "Assessment": f"{A} confirmed cases of {event_name} observed.",
+        "Strategic / Tactical Impact": f"Risk is elevated by {((prr_val-1)*100):.0f}% compared to peer therapeutics."
+    },
+    {
+        "Decision Area": "🏛️ Regulatory Compliance (FDA 21 CFR 314.80)",
+        "Assessment": "15-Day Expedited Alert Review" if prr_val >= 2.0 else "Routine Periodic Safety Report (PSUR)",
+        "Strategic / Tactical Impact": "Submit updated safety signals to FDA MedWatch within statutory timelines."
+    },
+    {
+        "Decision Area": "🏷️ Commercial & Labeling Strategy",
+        "Assessment": "Prescribing Information Update" if prr_val >= 1.5 else "Standard Label Maintenance",
+        "Strategic / Tactical Impact": "Proactive label modification mitigates litigation risk and protects patient trust."
+    }
 ])
 
-with tab_summary:
-    st.subheader(f"Clinical Case Overview: {drug_name}")
-    st.markdown(f"**Target Adverse Reaction:** `{event_name}`")
-    st.markdown(f"**Background Context:** {clinical_note}")
+st.table(summary_df)
 
-    st.markdown("---")
-    st.subheader("Decision Analytics & Regulatory Triage")
-    
-    col_sum1, col_sum2 = st.columns(2)
-    with col_sum1:
-        st.markdown("#### 🔍 Disproportionality Signal Assessment")
-        st.markdown(f"""
-        - **Proportional Reporting Ratio (PRR):** `{freq['prr']:.2f}` (FDA Threshold: $\ge 2.0$)
-        - **Yates' Corrected Chi-Square:** `{freq['chi2_yates']:.2f}` (Statistical Significance: $p = {freq['chi2_yates_pvalue']:.4g}$)
-        - **Fisher's Exact Hypergeometric Test:** $p = `{freq['fisher_pvalue']:.4g}`$
-        - **WHO BCPNN Information Component:** `IC = {bcpnn['ic']:.2f}` (Lower 95% Bound $\\text{{IC}}_{{0.25}} = {bcpnn['ic_025']:.2f}$)
-        """)
-
-    with col_sum2:
-        st.markdown("#### ⚖️ Regulatory & Commercial Impact")
-        st.markdown(f"""
-        - **Safety Action:** {triage['action']}
-        - **FDA 21 CFR 314.80 Compliance:** Expedited review for potential 15-day alert triage.
-        - **Risk-Benefit Profile:** Monitor incidence rates vs therapeutic efficacy endpoints.
-        - **Litigation & Labeling Risk:** Proactive label modification mitigates regulatory warning letter risk.
-        """)
-
-with tab_charts:
-    st.subheader("Statistical & Bayesian Visualizations")
-
-    chart_col1, chart_col2 = st.columns(2)
-    with chart_col1:
-        fig_bayes = plot_bayesian_posterior(bayes_prr, drug_name=drug_name, event_name=event_name)
-        st.plotly_chart(fig_bayes, use_container_width=True)
-
-    with chart_col2:
-        fig_forest = plot_forest_summary(freq, bayes_prr, bcpnn)
-        st.plotly_chart(fig_forest, use_container_width=True)
-
-    st.markdown("---")
-    volcano_list = [
-        {"drug": drug_name, "event": event_name, "frequentist": freq, "triage": triage},
-        {"drug": "Capivasertib", "event": "Stomatitis", "frequentist": calculate_frequentist_metrics(24, 956, 5120, 321800), "triage": {"tier": "HIGH", "color": "red"}},
-        {"drug": "Semaglutide", "event": "Gastroparesis", "frequentist": calculate_frequentist_metrics(412, 18450, 1250, 450000), "triage": {"tier": "HIGH", "color": "red"}},
-        {"drug": "Control Comparator", "event": "Headache", "frequentist": calculate_frequentist_metrics(5, 5000, 10000, 300000), "triage": {"tier": "NONE", "color": "green"}}
-    ]
-    fig_volcano = plot_volcano_quadrant(volcano_list)
-    st.plotly_chart(fig_volcano, use_container_width=True)
-
-with tab_matrix:
-    st.subheader("2x2 Contingency Matrix Breakdown")
-    fig_matrix = plot_contingency_matrix(A, B, C, D)
-    st.plotly_chart(fig_matrix, use_container_width=True)
-
-    st.markdown("#### Detailed Cell Counts")
-    matrix_df = pd.DataFrame([
-        {"Cell": "A (Drug + Event)", "Description": "Target Drug Co-occurring with Target Adverse Event", "Count": f"{A:,}"},
-        {"Cell": "B (Drug + Other Events)", "Description": "Target Drug with all other adverse events", "Count": f"{B:,}"},
-        {"Cell": "C (Other Drugs + Event)", "Description": "All other drugs associated with target adverse event", "Count": f"{C:,}"},
-        {"Cell": "D (General Background)", "Description": "General database background (Neither target drug nor event)", "Count": f"{D:,}"},
-        {"Cell": "Total (N)", "Description": "Total safety surveillance cohort size", "Count": f"{A+B+C+D:,}"}
-    ])
-    st.table(matrix_df)
-
-with tab_methods:
-    st.subheader("Statistical & Mathematical Methodology")
-    st.markdown(r"""
-    ### 1. Frequentist Metrics
-    - **Reporting Odds Ratio (ROR):**
-      $$\text{ROR} = \frac{A / B}{C / D} = \frac{A \cdot D}{B \cdot C}, \quad \text{SE}(\ln \text{ROR}) = \sqrt{\frac{1}{A} + \frac{1}{B} + \frac{1}{C} + \frac{1}{D}}$$
-    - **Proportional Reporting Ratio (PRR):**
-      $$\text{PRR} = \frac{A / (A+B)}{(A+C) / N}$$
-    - **Haldane's Odds Ratio (+0.5 Continuity Correction):**
-      $$\text{HOR} = \frac{(A + 0.5)(D + 0.5)}{(B + 0.5)(C + 0.5)}$$
-
-    ### 2. Bayesian Shrinkage & Monte Carlo Simulation
-    - **WHO UMC BCPNN Information Component (IC):**
-      $$\text{IC} = \log_2 \left( \frac{A_{\text{obs}}}{E} \right), \quad E = \frac{(A+B)(A+C)}{N}$$
-    - **Beta-Binomial Monte Carlo:**
-      $$s_1 \sim \text{Beta}(1 + A, 1 + B), \quad s_2 \sim \text{Beta}(1 + C, 1 + D), \quad \text{PRR}_{\text{sim}} = \frac{s_1}{s_2}$$
-    """)
-
-with tab_export:
-    st.subheader("Download Regulatory & Consulting Deliverables")
-    report_filename = f"FAERS_Report_{drug_name.replace(' ', '_').replace('/', '_')}.xlsx"
+# 5. ONE-CLICK EXPORT
+st.write("")
+col_exp1, col_exp2 = st.columns([1, 2])
+with col_exp1:
+    report_filename = f"Safety_Brief_{drug_name.replace(' ', '_').replace('/', '_')}.xlsx"
     export_excel_report(analysis, output_path=report_filename)
-
     with open(report_filename, "rb") as f:
         st.download_button(
-            label="📥 Download Multi-Sheet Excel Consulting Report",
+            label="📥 Download Executive Safety Brief (Excel)",
             data=f.read(),
             file_name=report_filename,
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
-    st.success(f"Report ready for export: `{report_filename}`")
+with col_exp2:
+    st.caption("Generates a multi-sheet regulatory deliverable formatted for Medical Affairs and Safety Review Committees.")
+
+# 6. COLLAPSIBLE TECHNICAL METHODOLOGY (For Deep-Dive Interviewers)
+with st.expander("🔬 Technical Deep-Dive & Statistical Methodology (Click to expand)"):
+    st.markdown(f"""
+    This platform implements dual-methodology pharmacovigilance disproportionality algorithms:
+    - **Proportional Reporting Ratio (PRR):** Measures relative risk disproportionality ($PRR = \\frac{{A/(A+B)}}{{C/(C+D)}} = {prr_val:.2f}$).
+    - **Bayesian Beta-Binomial Monte Carlo:** Runs 20,000 posterior simulation draws to adjust for small sample variance ($P(PRR > 1.0) = {confidence_pct:.1f}\\%$).
+    - **WHO UMC BCPNN Information Component (IC):** $\\text{{IC}} = {bcpnn['ic']:.2f}$ with 95% lower credibility bound $\\text{{IC}}_{{0.25}} = {bcpnn['ic_025']:.2f}$.
+    - **Dataset Source:** US FDA Adverse Event Reporting System (FAERS) Post-Marketing Surveillance Database.
+    """)
